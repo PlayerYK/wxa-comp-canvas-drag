@@ -1,0 +1,22 @@
+page{
+  background: #fafafa;
+}
+.canvas_wrap{
+  background: gray;
+  width:750rpx;
+  height:750rpx;
+}
+.control_panel{
+  position: absolute;
+  left:0;
+  right:0；
+  width：750rpx;
+  top:700rpx;
+}
+.btn{
+    padding: 10rpx 20rpx;
+    float:left;
+    margin:10rpx;
+    border:solid 1px #dfdfdf;
+    border-radius: 10rpx;
+}

@@ -1,4 +1,11 @@
 // components/canvas-drag/index.js
+
+// 20191115 新的canvas需要这样设置才能正常渲染
+// const ratio = wx.getSystemInfoSync().windowWidth / 750
+// const canvasWidth = 700 * ratio
+// const canvasHeight = 750 * ratio
+
+
 const DELETE_ICON_URL = './icon/close.png'; // 删除按钮
 const DRAG_ICON_URL = './icon/scale.png'; // 缩放按钮
 let DELETE_ICON = null;

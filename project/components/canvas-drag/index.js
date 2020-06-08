@@ -1,10 +1,14 @@
 // components/canvas-drag/index.js
+import { loadImage, throttle } from './util.js';
+
 
 // 20191115 新的canvas需要这样设置才能正常渲染
-// const ratio = wx.getSystemInfoSync().windowWidth / 750
-// const canvasWidth = 700 * ratio
-// const canvasHeight = 750 * ratio
-
+const screenWidth = wx.getSystemInfoSync().screenWidth;
+const factor = screenWidth / 750;
+function zoom(val){
+  val = +val || 0;
+  return val / factor;
+}
 
 const DELETE_ICON_URL = './icon/close.png'; // 删除按钮
 const DRAG_ICON_URL = './icon/scale.png'; // 缩放按钮
@@ -14,14 +18,16 @@ const STROKE_COLOR = 'red';
 const ROTATE_ENABLED = true;
 let isMove = false; // 标识触摸后是否有移动，用来判断是否需要增加操作历史
 
-const DEBUG_MODE = true; // 打开调试后会渲染操作区域边框（无背景时有效）
+const DEBUG_MODE = false; // 打开调试后会渲染操作区域边框（无背景时有效）
 
 // 删除按钮区域左上角的坐标和区域的高度宽度
-const delW = 30;
-const delH = 30;
+const delW = zoom(30);
+const delH = zoom(30);
 // 变换按钮区域左上角的坐标和区域的高度宽度
-const scaleW = 30;
-const scaleH = 30;
+const scaleW = zoom(30);
+const scaleH = zoom(30);
+
+let requestID = null; // 用来cancelAnimationFrame
 
 const dragGraph = function ({
   x = 30,
@@ -36,29 +42,35 @@ const dragGraph = function ({
   rotate = 0,
   sourceId = null,
   selected = true
-}, canvas, factor) {
+}, canvas) {
   this.fileUrl = url;
   this.text = text;
-  this.fontSize = fontSize;
+  this.fontSize = zoom(fontSize);
   this.color = color;
   this.canvas = canvas;
   this.ctx = canvas.getContext('2d');
   this.rotate = rotate;
   this.type = type;
   this.selected = selected;
-  this.factor = factor;
   this.sourceId = sourceId;
-  this.MIN_WIDTH = 20;
-  this.MIN_FONTSIZE = 10;
+  this.MIN_WIDTH = zoom(20);
+  this.MIN_FONTSIZE = zoom(10);
+  x = zoom(x);
+  y = zoom(y);
+  w = zoom(w);
+  h = zoom(h);
 
   if (type === 'text') {
-    this.canvas.font = `${fontSize}px serif`;
-    let textWidth = this.ctx.measureText(text).width;
-    let textHeight = fontSize + 10;
+    // console.log(this.fontSize)
+    this.ctx.font = `${this.fontSize}px serif`;
+    let textWidth = this.ctx.measureText(this.text).width;
+    let textHeight = this.fontSize + 20;
+
     this.centerX = x + textWidth / 2;
     this.centerY = y + textHeight / 2;
     this.w = textWidth;
     this.h = textHeight;
+    // console.log(this.centerX,this.centerY,textWidth,textHeight)
   } else {
     this.centerX = x + w / 2;
     this.centerY = y + h / 2;
@@ -77,57 +89,48 @@ const dragGraph = function ({
     [this.x + this.w, this.y + this.h],
     [this.x, this.y + this.h]
   ];
+
+  if (this.type == 'image'){
+    loadImage(this.canvas,this.fileUrl)
+    .then((img)=>{
+      this._img = img;
+    })
+  }
 };
 
 dragGraph.prototype = {
-  _loadImage(callback) {
-    const img = this.canvas.createImage();
-    img.onload = () => {
-      this._img = img;
-      callback && callback();
-    };
-    img.src = this.fileUrl;
-  },
   /**
    * 绘制元素
    */
   paint() {
-    if (this.type == 'image' && this._img == null) {
-      this._loadImage(() => this._paint())
-    } else {
-      this._paint();
+    if (this.type == 'image'){
+      if(!this._img){
+        console.log('img loading 还不能渲染')
+        // return;
+        loadImage(this.canvas,this.fileUrl)
+        .then((img)=>{
+          this._img = img;
+          this._paintImg()
+        });
+      }else{
+        this._paintImg();
+      }
+    }else{
+      this._paintText();
     }
   },
-  _paint() {
+
+  _paintImg(){
     this.ctx.save();
-    // 由于measureText获取文字宽度依赖于样式，所以如果是文字元素需要先设置样式
-    let textWidth = 0;
-    let textHeight = 0;
-    if (this.type === 'text') {
-      this.ctx.font = `${this.fontSize}px serif`;
-      this.ctx.textBaseline = "middle";
-      this.ctx.textAlign = 'center';
-      this.ctx.fillStyle = this.color;
-      textWidth = this.ctx.measureText(this.text).width;
-      textHeight = this.fontSize + 10;
-      // 字体区域中心点不变，左上角位移
-      this.x = this.centerX - textWidth / 2;
-      this.y = this.centerY - textHeight / 2;
-      this.w = textWidth;
-      this.height = textHeight;
-    }
 
     // 旋转元素
     this.ctx.translate(this.centerX, this.centerY);
     this.ctx.rotate(this.rotate * Math.PI / 180);
     this.ctx.translate(-this.centerX, -this.centerY);
     // 渲染元素
-    if (this.type === 'text') {
-      this.ctx.fillText(this.text, this.centerX, this.centerY);
-    } else if (this.type === 'image') {
-      console.log(this.x, this.y, this.w, this.h);
-      this.ctx.drawImage(this._img, this.x, this.y, this.w, this.h);
-    }
+    // console.log(this.x, this.y, this.w, this.h);
+    this.ctx.drawImage(this._img, this.x, this.y, this.w, this.h);
+
     // 如果是选中状态，绘制选择虚线框，和缩放图标、删除图标
     if (this.selected) {
       this.ctx.setLineDash([2, 5]);
@@ -135,46 +138,77 @@ dragGraph.prototype = {
       this.ctx.strokeStyle = STROKE_COLOR;
       this.ctx.lineDashOffset = 6;
 
-      if (this.type === 'text') {
-        this.ctx.strokeRect(this.x, this.y, textWidth, textHeight);
-        this.ctx.drawImage(DELETE_ICON, this.x - 15, this.y - 15, delW, delH);
-        this.ctx.drawImage(DRAG_ICON, this.x + textWidth - 15, this.y + textHeight - 15, scaleW, scaleH);
-      } else {
-        this.ctx.strokeRect(this.x, this.y, this.w, this.h);
-        this.ctx.drawImage(DELETE_ICON, this.x - 15, this.y - 15, delW, delH);
-        this.ctx.drawImage(DRAG_ICON, this.x + this.w - 15, this.y + this.h - 15, scaleW, scaleH);
-      }
+      this.ctx.strokeRect(this.x, this.y, this.w, this.h);
+      this.ctx.drawImage(DELETE_ICON, this.x - delW/2, this.y - delH/2, delW, delH);
+      this.ctx.drawImage(DRAG_ICON, this.x + this.w - scaleW/2, this.y + this.h - scaleH/2, scaleW, scaleH);
 
       // 调试模式，标识可操作区域
       if (DEBUG_MODE) {
         // 标识删除按钮区域
         this.ctx.strokeStyle = "green";
-        this.ctx.strokeRect(this.x - 15, this.y - 15, delW, delH);
+        this.ctx.strokeRect(this.x - delW/2, this.y - delH/2, delW, delH);
         // 标识旋转/缩放按钮区域
         this.ctx.strokeStyle = "black";
-        this.ctx.strokeRect(this.x + this.w - 15, this.y + this.h - 15, scaleW, scaleH);
-        // 标识移动区域
-        // this._drawBorder();
+        this.ctx.strokeRect(this.x + this.w - scaleW/2, this.y + this.h - scaleH/2, scaleW, scaleH);
       }
     }
+
     this.ctx.restore();
   },
-  /**
-   * 给矩形描边
-   * @private
-   */
-  // _drawBorder() {
-  //   let p = this.square;
-  //   let ctx = this.ctx;
-  //   this.ctx.save();
-  //   this.ctx.beginPath();
-  //   this.ctx.strokeStyle = "orange";
-  //   this._draw_line(this.ctx, p[0], p[1]);
-  //   this._draw_line(this.ctx, p[1], p[2]);
-  //   this._draw_line(this.ctx, p[2], p[3]);
-  //   this._draw_line(this.ctx, p[3], p[0]);
-  //   ctx.restore();
-  // },
+  _paintText(){
+    this.ctx.save();
+    // 由于measureText获取文字宽度依赖于样式，所以如果是文字元素需要先设置样式
+    let textWidth = 0;
+    let textHeight = 0;
+
+    this.ctx.font = `${this.fontSize}px serif`;
+    this.ctx.textBaseline = "middle";
+    this.ctx.textAlign = 'center';
+    this.ctx.fillStyle = this.color;
+    // textWidth = zoom(this.ctx.measureText(this.text).width);
+    textWidth = this.ctx.measureText(this.text).width;
+    textHeight = this.fontSize + 20;
+    // 字体区域中心点不变，左上角位移
+    this.x = this.centerX - textWidth / 2;
+    this.y = this.centerY - textHeight / 2;
+    this.w = textWidth;
+    this.h = textHeight;
+
+    // 旋转元素
+    this.ctx.translate(this.centerX, this.centerY);
+    this.ctx.rotate(this.rotate * Math.PI / 180);
+    this.ctx.translate(-this.centerX, -this.centerY);
+    // 渲染元素
+    this.ctx.fillText(this.text, this.centerX, this.centerY);
+
+    // 如果是选中状态，绘制选择虚线框，和缩放图标、删除图标
+    if (this.selected) {
+      this.ctx.setLineDash([4, 10]);
+      this.ctx.lineWidth = 4;
+      this.ctx.strokeStyle = STROKE_COLOR;
+      this.ctx.lineDashOffset = 12;
+
+      this.ctx.strokeRect(this.x, this.y, textWidth, textHeight);
+      this.ctx.drawImage(DELETE_ICON, this.x - delW/2, this.y - delH/2, delW, delH);
+      this.ctx.drawImage(DRAG_ICON, this.x + this.w - scaleW/2, this.y + this.h - scaleH/2, scaleW, scaleH);
+
+      // 调试模式，标识可操作区域
+      if (DEBUG_MODE) {
+        // 标识删除按钮区域
+        this.ctx.strokeStyle = "green";
+        // this.ctx.strokeRect(this.x - 15, this.y - 15, delW, delH);
+        this.ctx.strokeRect(this.x - delW/2, this.y - delH/2, delW, delH);
+        // 标识旋转/缩放按钮区域
+        this.ctx.strokeStyle = "black";
+        // this.ctx.strokeRect(this.x + this.w - 15, this.y + this.h - 15, scaleW, scaleH);
+        this.ctx.strokeRect(this.x + this.w - scaleW/2, this.y + this.h - scaleH/2, scaleW, scaleH);
+
+      }
+    }
+
+    this.ctx.restore();
+  },
+
   /**
    * 画一条线
    * @param ctx
@@ -182,40 +216,37 @@ dragGraph.prototype = {
    * @param b
    * @private
    */
-  _draw_line(ctx, a, b) {
-    ctx.moveTo(a[0], a[1]);
-    ctx.lineTo(b[0], b[1]);
-    ctx.stroke();
-  },
+  // _draw_line(ctx, a, b) {
+  //   ctx.moveTo(a[0], a[1]);
+  //   ctx.lineTo(b[0], b[1]);
+  //   ctx.stroke();
+  // },
   /**
    * 判断点击的坐标落在哪个区域
    * @param {*} x 点击的坐标
    * @param {*} y 点击的坐标
    */
   isInGraph(x, y) {
-    // 旋转后的删除区域坐标
-    const transformedDelCenter = this._rotatePoint(this.x, this.y, this.centerX, this.centerY, this.rotate);
-    const transformDelX = transformedDelCenter[0] - delW / 2;
-    const transformDelY = transformedDelCenter[1] - delH / 2;
+    // 旋转后的删除区域坐标，中心点
+    const [transformDelCenterX,transformDelCenterY] = this._rotatePoint(this.x, this.y, this.centerX, this.centerY, this.rotate);
+    // 旋转后的变换区域坐标，中心点
+    const [transformScaleCenterX,transformScaleCenterY] = this._rotatePoint(this.x + this.w, this.y + this.h, this.centerX, this.centerY, this.rotate);
 
-    const transformedScaleCenter = this._rotatePoint(this.x + this.w, this.y + this.h, this.centerX, this.centerY, this.rotate);
-
-    // 旋转后的变换区域坐标
-    const transformScaleX = transformedScaleCenter[0] - scaleW / 2;
-    const transformScaleY = transformedScaleCenter[1] - scaleH / 2;
-
-    if (x - transformScaleX >= 0 && y - transformScaleY >= 0 &&
-      transformScaleX + scaleW - x >= 0 && transformScaleY + scaleH - y >= 0) {
-      // 缩放区域
-      return 'transform';
-    } else if (x - transformDelX >= 0 && y - transformDelY >= 0 &&
-      transformDelX + delW - x >= 0 && transformDelY + delH - y >= 0) {
+    if (x >= transformDelCenterX - delW/2 && y >= transformDelCenterY - delH/2 &&
+      x <= transformDelCenterX + delW/2 && y <= transformDelCenterY + delH/2) {
       // 删除区域
+      console.log('删除区域')
       return 'del';
+    } else if (x >= transformScaleCenterX - scaleW/2 && y >= transformScaleCenterY - scaleH/2 &&
+      x <= transformScaleCenterX + scaleW/2 && y <= transformScaleCenterY + scaleH/2) {
+      // 缩放区域
+      console.log('缩放区域')
+      return 'transform';
     } else if (this.insidePolygon(this.square, [x, y])) {
       return 'move';
     }
     // 不在选择区域里面
+      // console.log('不在选择区域里面')
     return false;
   },
   /**
@@ -277,10 +308,9 @@ dragGraph.prototype = {
   transform(px, py, x, y, currentGraph) {
     // 获取选择区域的宽度高度
     if (this.type === 'text') {
-      // this.ctx.setFontSize(this.fontSize);
       this.ctx.font = `${this.fontSize}px serif`;
       let textWidth = this.ctx.measureText(this.text).width;
-      let textHeight = this.fontSize + 10;
+      let textHeight = zoom(this.fontSize + 20);
       this.w = textWidth;
       this.h = textHeight;
       // 字体区域中心点不变，左上角位移
@@ -325,22 +355,19 @@ dragGraph.prototype = {
       this.y = currentGraph.y - (new_h - currentGraph.h) / 2;
 
     } else if (this.type === 'text') {
-      const fontSize = currentGraph.fontSize * ((lineB - lineA) / lineA + 1);
-      this.fontSize = fontSize <= this.MIN_FONTSIZE ? this.MIN_FONTSIZE : fontSize;
+      const newFontSize = currentGraph.fontSize * ((lineB - lineA) / lineA + 1);
+      this.fontSize = newFontSize <= this.MIN_FONTSIZE ? this.MIN_FONTSIZE : newFontSize;
 
       // 旋转位移后重新计算坐标
       this.ctx.font = `${this.fontSize}px serif`;
       let textWidth = this.ctx.measureText(this.text).width;
-      let textHeight = this.fontSize + 10;
+      let textHeight = this.fontSize + 20;
       this.w = textWidth;
       this.h = textHeight;
       // 字体区域中心点不变，左上角位移
       this.x = this.centerX - textWidth / 2;
       this.y = this.centerY - textHeight / 2;
     }
-  },
-  toPx(rpx) {
-    return rpx * this.factor;
   },
 };
 
@@ -377,6 +404,7 @@ Component({
     height: {
       type: Number,
       value: 750,
+      observer: '_resize',
     },
     enableUndo: {
       type: Boolean,
@@ -393,9 +421,6 @@ Component({
   lifetimes: {
     attached() {
       let that = this;
-      const sysInfo = wx.getSystemInfoSync();
-      const screenWidth = sysInfo.screenWidth;
-      this.factor = screenWidth / 750;
 
       if (typeof this.drawArr === 'undefined') {
         this.drawArr = [];
@@ -423,21 +448,25 @@ Component({
       this.canvas = currentCanvas;
       this.ctx = this.canvas.getContext('2d');
 
+      // 20191115 新的canvas需要这样设置才能正常渲染
+      this.canvas.width = this.data.width
+      this.canvas.height = this.data.height
 
-      const img_delete = this.canvas.createImage();
-      img_delete.onload = () => {
-        DELETE_ICON = img_delete;
-      }
-      img_delete.src = DELETE_ICON_URL;
 
-      const img_resize = this.canvas.createImage();
-      img_resize.onload = () => {
-        DRAG_ICON = img_resize;
-      }
-      img_resize.src = DRAG_ICON_URL;
-    },
-    toPx(rpx) {
-      return rpx * this.factor;
+      loadImage(this.canvas,DELETE_ICON_URL)
+      .then((img)=>{
+        DELETE_ICON = img;
+      });
+
+      loadImage(this.canvas,DRAG_ICON_URL)
+      .then((img)=>{
+        DRAG_ICON = img;
+      });
+
+      // this.draw = throttle(this._draw,40,this);
+      // this.move = throttle(this._move,40,this);
+      this.draw = this._draw;
+      this.move = this._move;
     },
     initBg() {
       this.data.bgColor = '';
@@ -473,12 +502,19 @@ Component({
         console.log('已是第一步，不能回退');
       }
     },
+    _resize(n,o){
+      console.log("重设canvas尺寸 height",n)
+      this.canvas.height = n;
+      // todo 改变高度后，canvas内容会丢失，从历史重新渲染会错位
+      // let newConfigObj = this.data.history[this.data.history.length - 1];
+      //   this.initByArr(JSON.parse(newConfigObj));
+    },
     onGraphChange(n, o) {
       if (JSON.stringify(n) === '{}') return;
       this.drawArr.push(new dragGraph(Object.assign({
         x: 30,
         y: 30,
-      }, n), this.canvas, this.factor));
+      }, n), this.canvas));
       this.draw();
       // 参数有变化时记录历史
       this.recordHistory();
@@ -497,10 +533,16 @@ Component({
             break;
           case 'bgImage':
             this.data.bgColor = '';
-            this.data.bgImageSrc = '';
+            this.data.bgImageSrc = item.url;
+            this.data.bgImage = null;
             if (item.sourceId) {
               this.data.bgSourceId = item.sourceId;
             }
+            loadImage(this.canvas,this.data.bgImageSrc)
+            .then((img)=>{
+              this.data.bgImage = img;
+            });
+
             break;
           case 'image':
           case 'text':
@@ -509,67 +551,59 @@ Component({
             } else {
               item.selected = false;
             }
-            this.drawArr.push(new dragGraph(item, this.canvas, this.factor));
+            this.drawArr.push(new dragGraph(item, this.canvas));
             break;
         }
 
       });
       this.draw();
     },
-    draw() {
+    _draw(){
       // 先清空画布
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      // let currentDrawArr = this.drawArr.slice();
 
-      // if (this.data.bgImage !== '') {
-      //   const bgImg = this.canvas.createImage();
-      //   bgImg.onload = () => {
-      //     this.ctx.drawImage(bgImg, 0, 0, this.toPx(this.data.width), this.toPx(this.data.height));
-      //   };
-      //   bgImg.src = this.data.bgImage;
-      // }
-
-      if (this.data.bgImageSrc !== '') {
-        // if (this.data.bgImage == null) {
-        //   await drawImage(this.canvas, {
-        //     src: this.data.bgImage,
-        //     x: 0,
-        //     y: 0,
-        //     w: this.toPx(this.data.width),
-        //     h: this.toPx(this.data.height),
-        //   });
-        //   console.log(tmpImgObj);
-        //   this.data.bgImage = tmpImgObj;
-        // } else {
-        //   this.ctx.drawImage(this.data.bgImage, 0, 0, this.toPx(this.data.width), this.toPx(this.data.height));
-        // }
-
-        // currentDrawArr.unshift(new dragGraph({
-        //   x: 0,
-        //   y: 0,
-        //   w: this.toPx(this.data.width),
-        //   h: this.toPx(this.data.height),
-        //   type: 'image',
-        //   url: this.data.bgImageSrc,
-        //   selected: false,
-        // }, this.canvas, this.factor));
-      }
-
+      return this._drawBg()
+      .then(()=>{
+        this.drawArr.forEach((item) => {
+          // console.log(item);
+          item.paint();
+        });
+      });
+    },
+    _drawBg(){
+      // console.log('enter draw BG',this.data);
       if (this.data.bgColor !== '') {
+        // console.log('with bg color');
         this.ctx.save();
         this.ctx.fillStyle = this.data.bgColor;
-        this.ctx.fillRect(0, 0, this.toPx(this.data.width), this.toPx(this.data.height));
+        this.ctx.fillRect(0, 0, this.data.width, this.data.height);
         this.ctx.restore();
+        return new Promise((resolve) => {
+          resolve();
+        });
+      }else if (this.data.bgImageSrc !== '') {
+        // console.log('with bgImageSrc ')
+        if (this.data.bgImage){
+          // console.log('draw from this.data.bgImage ')
+          this.ctx.drawImage(this.data.bgImage, 0, 0, this.data.width, this.data.height);
+          return new Promise((resolve) => {
+            resolve();
+          });
+        }else{
+          console.log('load from this.data.bgImageSrc')
+          return loadImage(this.canvas,this.data.bgImageSrc)
+          .then((img)=>{
+            // console.log('draw from this.data.bgImageSrc')
+            this.data.bgImage = img;
+            this.ctx.drawImage(this.data.bgImage, 0, 0, this.data.width, this.data.height);
+          });
+        }
+      }else{
+        // console.log('no bg or bgc')
+        return new Promise((resolve) => {
+          resolve();
+        });
       }
-
-      this.drawArr.forEach((item) => {
-        console.log(item);
-        item.paint();
-      });
-
-      return new Promise((resolve) => {
-        resolve();
-      });
     },
     start(e) {
       isMove = false; // 重置移动标识
@@ -577,18 +611,20 @@ Component({
         x,
         y
       } = e.touches[0];
+      const pointerX = zoom(x);
+      const pointerY = zoom(y);
       this.tempGraphArr = [];
       let lastDelIndex = null; // 记录最后一个需要删除的索引
       if (this.drawArr && this.drawArr.length) {
         this.drawArr.forEach((item, index) => {
-          const action = item.isInGraph(x, y);
+          const action = item.isInGraph(pointerX, pointerY);
           if (action) {
             item.action = action;
             this.tempGraphArr.push(item);
             // 保存点击时的坐标
             this.currentTouch = {
-              x,
-              y
+              pointerX,
+              pointerY
             };
             if (action === 'del') {
               lastDelIndex = index; // 标记需要删除的元素
@@ -609,7 +645,7 @@ Component({
             if (lastDelIndex !== null && this.tempGraphArr[i].selected) {
               if (this.drawArr[lastDelIndex].action === 'del') {
                 this.drawArr.splice(lastDelIndex, 1);
-                this.ctx.clearRect(0, 0, this.toPx(this.data.width), this.toPx(this.data.height));
+                this.ctx.clearRect(0, 0, this.data.width, this.data.height);
               }
             } else {
               this.tempGraphArr[lastIndex].selected = true;
@@ -622,31 +658,36 @@ Component({
           }
         }
       }
-      this.draw();
+
+      this.draw()
     },
-    move(e) {
+    _move(e) {
       const {
         x,
         y
       } = e.touches[0];
+      const pointerX = zoom(x);
+      const pointerY = zoom(y);
       if (this.tempGraphArr && this.tempGraphArr.length > 0) {
         isMove = true; // 有选中元素，并且有移动时，设置移动标识
         const currentGraph = this.tempGraphArr[this.tempGraphArr.length - 1];
         if (currentGraph.action === 'move') {
-          currentGraph.centerX = this.currentGraph.centerX + (x - this.currentTouch.x);
-          currentGraph.centerY = this.currentGraph.centerY + (y - this.currentTouch.y);
+          currentGraph.centerX = this.currentGraph.centerX + (pointerX - this.currentTouch.pointerX);
+          currentGraph.centerY = this.currentGraph.centerY + (pointerY - this.currentTouch.pointerY);
           // 使用中心点坐标计算位移，不使用 x,y 坐标，因为会受旋转影响。
           if (currentGraph.type !== 'text') {
             currentGraph.x = currentGraph.centerX - this.currentGraph.w / 2;
             currentGraph.y = currentGraph.centerY - this.currentGraph.h / 2;
           }
         } else if (currentGraph.action === 'transform') {
-          currentGraph.transform(this.currentTouch.x, this.currentTouch.y, x, y, this.currentGraph);
+          currentGraph.transform(this.currentTouch.pointerX, this.currentTouch.pointerY, pointerX, pointerY, this.currentGraph);
         }
         // 更新4个坐标点（相对于画布的坐标系）
         currentGraph._rotateSquare();
 
-        this.draw();
+        this.draw()
+        // this.canvas.requestAnimationFrame(this.draw());
+        return false;
       }
     },
     end(e) {
@@ -665,7 +706,9 @@ Component({
         });
         this.draw().then(() => {
           wx.canvasToTempFilePath({
-            canvasId: 'canvas-label',
+            // canvasId: 'canvas-label',
+            // https://developers.weixin.qq.com/community/develop/doc/000ae64c240f78b7125932b375b400
+            canvas:this.canvas, 
             success: (res) => {
               resolve(res.tempFilePath);
             },
@@ -674,7 +717,7 @@ Component({
             },
           }, this);
         });
-      })
+      });
     },
     exportJson() {
       return new Promise((resolve, reject) => {
@@ -755,13 +798,17 @@ Component({
         this.data.bgImageSrc = newBgImg.url;
         this.data.bgImage = null;
       }
-      this.draw();
-      // 改变背景图片时记录历史
-      this.recordHistory();
+
+      loadImage(this.canvas,this.data.bgImageSrc)
+      .then((img)=>{
+        this.data.bgImage = img;
+        this.draw();
+        // 改变背景图片时记录历史
+        this.recordHistory();
+      });
     },
     clearCanvas() {
-      this.ctx.clearRect(0, 0, this.toPx(this.data.width), this.toPx(this.data.height));
-      // this.ctx.draw();
+      this.ctx.clearRect(0, 0, this.data.width, this.data.height);
       this.drawArr = [];
       this.initBg(); // 重置绘画背景
       this.initHistory(); // 清空历史记录

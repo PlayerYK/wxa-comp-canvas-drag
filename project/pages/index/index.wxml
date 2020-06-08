@@ -1,5 +1,5 @@
 <view class="canvas_wrap">
-  <canvas-drag id="canvas-drag" graph="{{graph}}" width="700" height="750" enableUndo="{{true}}"></canvas-drag>
+  <canvas-drag id="canvas-drag" graph="{{graph}}" width="{{cWidth}}" height="{{cHeight}}" enableUndo="{{true}}"></canvas-drag>
 </view>
 <view class="control_panel">
   <view class="btn" bindtap="onAddImage">添加图片</view>
@@ -13,4 +13,5 @@
   <view class="btn" bindtap="onImport">导入默认模板</view>
   <view class="btn" bindtap="onClearCanvas">清空画布</view>
   <view class="btn" bindtap="onUndo">后退</view>
+  <view class="btn" bindtap="onChangeSize">改变画布尺寸</view>
 </view>

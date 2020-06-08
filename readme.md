@@ -1,9 +1,7 @@
 ## wxa-comp-canvas-drag
 
-小程序组件-canvas拖拽画板
-
-[![npm-version](https://img.shields.io/npm/v/wxa-comp-canvas-drag.svg)](https://www.npmjs.com/package/wxa-comp-canvas-drag)
-[![npm-version](https://img.shields.io/npm/dm/wxa-comp-canvas-drag.svg?style=flat)](https://www.npmjs.com/package/wxa-comp-canvas-drag)
+项目源自 [wxa-comp-canvas-drag](https://github.com/wxa-component/wxa-comp-canvas-drag)，
+小程序组件-canvas拖拽画板，微信原生 canvas 替换为微信 canvas 2d 接口。
 
 ## 概述
 
@@ -19,19 +17,7 @@ wxa-comp-canvas-drag是一个可以添加多种元素（图片和文字）的画
 
 ## 安装
 
-#### 方式一.通过 npm 安装 (推荐)
-
-小程序已经支持使用 npm 安装第三方包，详见 [npm 支持](https://developers.weixin.qq.com/miniprogram/dev/devtools/npm.html?search-key=npm)
-
-```shell
-# npm
-npm i wxa-comp-canvas-drag -S --production
-
-# yarn
-yarn add wxa-comp-canvas-drag --production
-```
-
-#### 方式二.下载代码
+### 下载代码
 
 直接通过 git 下载 wxa-comp-canvas-drag 源代码，并将`miniprogram_dist`目录拷贝到自己的项目组件目录中
 
